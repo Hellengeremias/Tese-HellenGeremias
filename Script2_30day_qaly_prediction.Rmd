@@ -1,0 +1,569 @@
+---
+title: "30day_QALY_prediction"
+author: "Hellen Geremias dos Santos"
+date: "4 de maio de 2018"
+output: html_document
+---
+
+# Packages
+```{r}
+library(tidyverse)
+library(plyr)
+library(caret)
+library(e1071)
+library(reshape2)
+library(reshape)
+library(dummies)
+library(lattice)
+library(pROC)
+library(ROCR)
+library (epitools)
+library(RcmdrMisc)
+library(epiDisplay)
+library(ResourceSelection)
+```
+
+# Import Data set
+```{r}
+qaly_data<-read.csv2("qaly_dataset.csv",header = T)
+```
+
+# Descriptive analyses
+- Table 1
+```{r}
+names(qaly_data)[29]<-"Y"
+summary(qaly_data)
+
+sd(qaly_data$age)
+sd(qaly_data$bmi)
+
+numSummary(qaly_data$age, groups=qaly_data$Y,
+           statistics=c("mean", "sd", "IQR", "quantiles"),
+           quantiles=c(0,.25,.5,.75,1))
+
+numSummary(qaly_data$bmi, groups=qaly_data$Y,
+           statistics=c("mean", "sd", "IQR", "quantiles"),
+           quantiles=c(0,.25,.5,.75,1))
+
+round(100*prop.table(table(qaly_data$gender)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),gender))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),gender))),1)
+
+round(100*prop.table(table(qaly_data$renal_failure)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),renal_failure))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),renal_failure))),1)
+
+round(100*prop.table(table(qaly_data$pulmonary_failure)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),pulmonary_failure))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),pulmonary_failure))),1)
+
+round(100*prop.table(table(qaly_data$heart_failure)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),heart_failure))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),heart_failure))),1)
+
+round(100*prop.table(table(qaly_data$diabetes)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),diabetes))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),diabetes))),1)
+
+round(100*prop.table(table(qaly_data$alcohol_use)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),alcohol_use))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),alcohol_use))),1)
+
+round(100*prop.table(table(qaly_data$steroids)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),steroids))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),steroids))),1)
+
+round(100*prop.table(table(qaly_data$smoking)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),smoking))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),smoking))),1)
+
+round(100*prop.table(table(qaly_data$ecog)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),ecog))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),ecog))),1)
+
+round(100*prop.table(table(qaly_data$delirium)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),delirium))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),delirium))),1)
+
+round(100*prop.table(table(qaly_data$typeadm)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),typeadm))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),typeadm))),1)
+
+round(100*prop.table(table(qaly_data$nosocomial_infection)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),nosocomial_infection))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),nosocomial_infection))),1)
+
+round(100*prop.table(table(qaly_data$respiratory_infection)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),respiratory_infection))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),respiratory_infection))),1)
+
+round(100*prop.table(table(qaly_data$mechanical_ventilation)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),mechanical_ventilation))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),mechanical_ventilation))),1)
+```
+
+- Table 2
+```{r}
+round(100*prop.table(table(qaly_data$primary_site)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),primary_site))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),primary_site))),1)
+
+round(100*prop.table(table(qaly_data$cancer_status)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),cancer_status))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),cancer_status))),1)
+
+round(100*prop.table(table(qaly_data$cancer_extension)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),cancer_extension))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),cancer_extension))),1)
+
+round(100*prop.table(table(qaly_data$surgery)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),surgery))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),surgery))),1)
+
+round(100*prop.table(table(qaly_data$chemotherapy)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),chemotherapy))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),chemotherapy))),1)
+
+round(100*prop.table(table(qaly_data$radiotherapy)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),radiotherapy))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),radiotherapy))),1)
+
+round(100*prop.table(table(qaly_data$intracranial_mass_effect)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),intracranial_mass_effect))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),intracranial_mass_effect))),1)
+
+round(100*prop.table(table(qaly_data$obstruction_airways)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),obstruction_airways))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),obstruction_airways))),1)
+
+round(100*prop.table(table(qaly_data$spinal_cord_compression)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),spinal_cord_compression))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),spinal_cord_compression))),1)
+
+round(100*prop.table(table(qaly_data$toxicity_chemotherapy)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),toxicity_chemotherapy))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),toxicity_chemotherapy))),1)
+
+round(100*prop.table(table(qaly_data$bleeding)),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="Yes"),bleeding))),1)
+round(100*prop.table(table(dplyr::select(filter(qaly_data, Y=="No"),bleeding))),1)
+```
+
+# Nested cross validation
+- Performance measures
+```{r}
+#to obtain different performance measures (accuracy, Kappa, area under ROC curve, sensitivity, specificity)
+set.seed(8)
+fiveStats<-function(...)c(twoClassSummary(...),defaultSummary(...))
+
+#control function
+set.seed(8)
+ctrl <- trainControl(method = "cv",
+                     number=10, 
+                     savePredictions=TRUE,
+                     classProbs = TRUE,
+                     summaryFunction = fiveStats,
+                     verboseIter = TRUE)
+```
+
+- Iterative training process
+```{r}
+#vectors of estimated probabilities
+p_YesLR<-NULL
+p_YesGLMNET<-NULL
+p_YesNNET<-NULL
+p_YesXGB<-NULL
+p_YesRF<-NULL
+
+#Results from training process
+Results_LR<-list()
+Results_GLMNET<-list()
+Results_NNET<-list()
+Results_XGB<-list()
+Results_RF<-list()
+
+#Iterative process to adjust machine learning algorithms
+p=1
+for (p in 1: nrow(qaly_data)){
+  trainData<-dplyr::select(qaly_data[-p,],-c(TSQV,TSQV_dic_0,TSQV_dic_60))
+  
+  testData<-select(qaly_data[p,],-c(TSQV,TSQV_dic_0,TSQV_dic_60))
+  
+  #Logistic regression
+  set.seed(1)
+  logreg <- train(Y ~ ., data=trainData,
+                  method="glm",
+                  trControl=trainControl(method = "none",
+                                         savePredictions=TRUE,
+                                         classProbs = TRUE,
+                                         summaryFunction = fiveStats),
+                  family="binomial",
+                  metric="ROC")
+  
+  Results_LR[[p]]<-logreg$results
+  
+  predicao_probLR <- predict(logreg,dplyr::select(testData,-Y),type="prob")
+  p_YesLR[p] <- predicao_probLR[,"Yes"]
+  
+  #-----------------------------------------------------------------
+  #GLMNET
+  glmnetGRID<-expand.grid(.alpha=c(0,0.3,0.5,0.7,1),
+                          .lambda=c(0.001,0.003,0.005,0.01,0.03,0.05,0.1,0.3,0.5,1))
+  
+  set.seed(1)
+  glmnetModel <- train(Y ~ ., data=trainData,
+                       method="glmnet",
+                       tuneGrid=glmnetGRID,
+                       trControl=ctrl,
+                       metric="ROC")
+  
+  Results_GLMNET[[p]]<-glmnetModel$results
+  
+  predicao_probglmnet <- predict(glmnetModel,dplyr::select(testData,-Y),type="prob")
+  p_YesGLMNET[p] <- predicao_probglmnet[,"Yes"]
+  
+  #-----------------------------------------------------------------
+  #Neural network
+  nnetGRID<-expand.grid(.size=c(1,2,3,4,5),
+                        .decay=c(0.001,0.01,0.1,0.5,1,1.5,2))
+  
+  set.seed(1)
+  nnetModel <- train(Y ~ ., data=trainData,
+                     method="nnet",
+                     tuneGrid=nnetGRID,
+                     trControl=ctrl,
+                     metric="ROC")
+  
+  Results_NNET[[p]]<-nnetModel$results
+  
+  predicao_probNNET <- predict(nnetModel,dplyr::select(testData,-Y),type="prob")
+  p_YesNNET[p] <- predicao_probNNET[,"Yes"]
+  
+  #-----------------------------------------------------------------
+  #Gradient boosted trees
+  xgbGRID<-expand.grid(.nrounds=c(50,100,150,200,300,500),
+                       .max_depth=c(1,2,3,4,5,6),
+                       .eta=c(0.001,0.01,0.05,0.1,0.2,0.3),
+                       .gamma=0,
+                       .colsample_bytree=1,
+                       .min_child_weight=1,
+                       .subsample=1)
+  set.seed(1)
+  XGBmodel <- train(Y ~ ., data=trainData,
+                    method="xgbTree",
+                    tuneGrid=xgbGRID,
+                    trControl=ctrl,
+                    metric="ROC")
+  
+  Results_XGB[[p]]<-XGBmodel$results
+  
+  predicao_probXGB <- predict(XGBmodel,dplyr::select(testData,-Y),type="prob")
+  p_YesXGB[p] <- predicao_probXGB[,"Yes"]
+  
+  #-----------------------------------------------------------------
+  #Random forest
+  set.seed(1)
+  RFmodel <- train(Y ~ ., data=trainData,
+                   method="rf",
+                   tuneGrid=expand.grid(.mtry=c(2,4,5,6,12,18,28)),
+                   trControl=ctrl,
+                   metric="ROC",
+                   importante=T)
+  
+  Results_RF[[p]]<-RFmodel$results
+  
+  predicao_probRF <- predict(RFmodel,dplyr::select(testData,-Y),type="prob")
+  p_YesRF[p] <- predicao_probRF[,"Yes"]
+  p=p+1
+}
+```
+
+# Performance evaluation
+
+# Discrimination measures
+- ROC curve
+```{r}
+#---------------------------------------------------------------
+#Logistic regression
+rocCurveLR <- roc(response = qaly_data$Y, 
+                  predictor = p_YesLR,
+                  levels = rev(levels(qaly_data$Y)))
+
+AUC_lr<-pROC::auc(rocCurveLR)
+AUC_lr
+IC_AUC_lr<-pROC::ci.auc(rocCurveLR)
+IC_AUC_lr
+plot(rocCurveLR)
+
+#---------------------------------------------------------------
+#GLMNET
+rocCurveGLMNET <- roc(response = qaly_data$Y, 
+                      predictor = p_YesGLMNET,
+                      levels = rev(levels(qaly_data$Y)))
+
+AUC_glmnet<-pROC::auc(rocCurveGLMNET)
+AUC_glmnet
+IC_AUC_glmnet<-pROC::ci.auc(rocCurveGLMNET)
+IC_AUC_glmnet
+plot(rocCurveGLMNET)
+
+#---------------------------------------------------------------
+#Neural network
+rocCurveNNET <- roc(response = qaly_data$Y, 
+                    predictor = p_YesNNET,
+                    levels = rev(levels(qaly_data$Y)))
+
+AUC_nnet<-pROC::auc(rocCurveNNET)
+AUC_nnet
+IC_AUC_nnet<-pROC::ci.auc(rocCurveNNET)
+IC_AUC_nnet
+plot(rocCurveNNET)
+
+#---------------------------------------------------------------
+#Gradient boosted trees
+rocCurveXGB <- roc(response = qaly_data$Y, 
+                   predictor = p_YesXGB,
+                   levels = rev(levels(qaly_data$Y)))
+
+AUC_xgb<-pROC::auc(rocCurveXGB)
+AUC_xgb
+IC_AUC_xgb<-pROC::ci.auc(rocCurveXGB)
+IC_AUC_xgb
+plot(rocCurveXGB)
+
+#---------------------------------------------------------------
+#Random forest
+rocCurveRF <- roc(response = qaly_data$Y, 
+                  predictor = p_YesRF,
+                  levels = rev(levels(qaly_data$Y)))
+
+AUC_rf<-pROC::auc(rocCurveRF)
+AUC_rf
+IC_AUC_rf<-pROC::ci.auc(rocCurveRF)
+IC_AUC_rf
+plot(rocCurveRF)
+
+#--------------------------------------------------------------------------------------------------------------
+#Performance table
+AUC<-as.data.frame(rbind(AUC_lr,AUC_glmnet,AUC_nnet,AUC_xgb,AUC_rf),row.names=F)
+names(AUC)[1]<-"AUC"
+
+IC_AUC<-as.data.frame(rbind(IC_AUC_lr,IC_AUC_glmnet,IC_AUC_nnet,
+                            IC_AUC_xgb,IC_AUC_rf),row.names=F)
+
+names(IC_AUC)[1:3]<-c("int_INF","AUC","int_SUP")
+IC_AUC<-dplyr::select(IC_AUC,-AUC)
+
+Algorithm<-c("Logistic regression","Penalized Logistic Regression",
+             "Neural Network","Boosting","Random Forest")
+
+performance<-cbind(Algorithm,AUC,IC_AUC)
+performance_30d<-performance
+performance_30d[order(performance_30d$AUC,decreasing = T),]
+
+```
+
+- % highest risk
+```{r}
+#---------------------------------------------------------------
+#Logistic regression
+#Regressao Logistica
+df_LR<-as.data.frame(cbind(banco_final_nCV$Y,p_YesLR))
+df_LR2<-df_LR[order(df_LR$p_YesLR, decreasing = T),]
+
+#30% maior risco
+df_LR2_30<-df_LR2[1:round(.30*nrow(df_LR),0),]
+table(df_LR2_30$V1)
+
+(table(df_LR2_30$V1)[1]/table(df_LR$V1)[1])
+(table(df_LR2_30$V1)[2]/table(df_LR$V1)[2])
+
+#20% maior risco
+df_LR2_20<-df_LR2[1:round(.30*nrow(df_LR),0),]
+table(df_LR2_20$V1)
+
+(table(df_LR2_20$V1)[1]/table(df_LR$V1)[1])
+(table(df_LR2_20$V1)[2]/table(df_LR$V1)[2])
+
+#10% maior risco
+df_LR2_10<-df_LR2[1:round(.30*nrow(df_LR),0),]
+table(df_LR2_10$V1)
+
+(table(df_LR2_10$V1)[1]/table(df_LR$V1)[1])
+(table(df_LR2_10$V1)[2]/table(df_LR$V1)[2])
+
+#---------------------------------------------------------------
+#GLMNET
+df_GLMNET<-as.data.frame(cbind(banco_final_nCV$Y,p_YesGLMNET))
+df_GLMNET2<-df_GLMNET[order(df_GLMNET$p_YesGLMNET, decreasing = T),]
+
+#30% maior risco
+df_GLMNET2_30<-df_GLMNET2[1:round(.30*nrow(df_GLMNET),0),]
+table(df_GLMNET2_30$V1)
+
+(table(df_GLMNET2_30$V1)[1]/table(df_GLMNET$V1)[1])
+(table(df_GLMNET2_30$V1)[2]/table(df_GLMNET$V1)[2])
+
+#20% maior risco
+df_GLMNET2_20<-df_GLMNET2[1:round(.30*nrow(df_GLMNET),0),]
+table(df_GLMNET2_20$V1)
+
+(table(df_GLMNET2_20$V1)[1]/table(df_GLMNET$V1)[1])
+(table(df_GLMNET2_20$V1)[2]/table(df_GLMNET$V1)[2])
+
+#10% maior risco
+df_GLMNET2_10<-df_GLMNET2[1:round(.30*nrow(df_GLMNET),0),]
+table(df_GLMNET2_10$V1)
+
+(table(df_GLMNET2_10$V1)[1]/table(df_GLMNET$V1)[1])
+(table(df_GLMNET2_10$V1)[2]/table(df_GLMNET$V1)[2])
+
+#---------------------------------------------------------------
+#Neural network
+df_NNET<-as.data.frame(cbind(banco_final_nCV$Y,p_YesNNET))
+df_NNET2<-df_NNET[order(df_NNET$p_YesNNET, decreasing = T),]
+
+#30% maior risco
+df_NNET2_30<-df_NNET2[1:round(.30*nrow(df_NNET),0),]
+table(df_NNET2_30$V1)
+
+(table(df_NNET2_30$V1)[1]/table(df_NNET$V1)[1])
+(table(df_NNET2_30$V1)[2]/table(df_NNET$V1)[2])
+
+#20% maior risco
+df_NNET2_20<-df_NNET2[1:round(.30*nrow(df_NNET),0),]
+table(df_NNET2_20$V1)
+
+(table(df_NNET2_20$V1)[1]/table(df_NNET$V1)[1])
+(table(df_NNET2_20$V1)[2]/table(df_NNET$V1)[2])
+
+#10% maior risco
+df_NNET2_10<-df_NNET2[1:round(.30*nrow(df_NNET),0),]
+table(df_NNET2_10$V1)
+
+(table(df_NNET2_10$V1)[1]/table(df_NNET$V1)[1])
+(table(df_NNET2_10$V1)[2]/table(df_NNET$V1)[2])
+
+#---------------------------------------------------------------
+#Gradient boosted trees
+df_XGB<-as.data.frame(cbind(banco_final_nCV$Y,p_YesXGB))
+df_XGB2<-df_XGB[order(df_XGB$p_YesXGB, decreasing = T),]
+
+#30% maior risco
+df_XGB2_30<-df_XGB2[1:round(.30*nrow(df_XGB),0),]
+table(df_XGB2_30$V1)
+
+(table(df_XGB2_30$V1)[1]/table(df_XGB$V1)[1])
+(table(df_XGB2_30$V1)[2]/table(df_XGB$V1)[2])
+
+#20% maior risco
+df_XGB2_20<-df_XGB2[1:round(.30*nrow(df_XGB),0),]
+table(df_XGB2_20$V1)
+
+(table(df_XGB2_20$V1)[1]/table(df_XGB$V1)[1])
+(table(df_XGB2_20$V1)[2]/table(df_XGB$V1)[2])
+
+#10% maior risco
+df_XGB2_10<-df_XGB2[1:round(.30*nrow(df_XGB),0),]
+table(df_XGB2_10$V1)
+
+(table(df_XGB2_10$V1)[1]/table(df_XGB$V1)[1])
+(table(df_XGB2_10$V1)[2]/table(df_XGB$V1)[2])
+
+#---------------------------------------------------------------
+#Ranfom forest
+df_RF<-as.data.frame(cbind(banco_final_nCV$Y,p_YesRF))
+df_RF2<-df_RF[order(df_RF$p_YesRF, decreasing = T),]
+
+#30% maior risco
+df_RF2_30<-df_RF2[1:round(.30*nrow(df_RF),0),]
+table(df_RF2_30$V1)
+
+(table(df_RF2_30$V1)[1]/table(df_RF$V1)[1])
+(table(df_RF2_30$V1)[2]/table(df_RF$V1)[2])
+
+#20% maior risco
+df_RF2_20<-df_RF2[1:round(.30*nrow(df_RF),0),]
+table(df_RF2_20$V1)
+
+(table(df_RF2_20$V1)[1]/table(df_RF$V1)[1])
+(table(df_RF2_20$V1)[2]/table(df_RF$V1)[2])
+
+#10% maior risco
+df_RF2_10<-df_RF2[1:round(.30*nrow(df_RF),0),]
+table(df_RF2_10$V1)
+
+(table(df_RF2_10$V1)[1]/table(df_RF$V1)[1])
+(table(df_RF2_10$V1)[2]/table(df_RF$V1)[2])
+
+```
+
+# Calibration measures
+- Calibration curve
+```{r}
+trellis.par.set(caretTheme())
+lift_results1<-data.frame(banco_final_nCV$Y,p_YesLR,p_YesGLMNET,p_YesNNET,p_YesXGB,p_YesRF)
+
+head(lift_results1)
+names(lift_results1)[1]<-"Class"
+
+t_g<-as.data.frame(cal_obj$data)
+dt_g$calibModelVar<-revalue(dt_g$calibModelVar,c("p_YesLR"="Logistic Regression",
+                                                 "p_YesGLMNET"="Penalized logistic regression",
+                                                 "p_YesNNET"="Neural network",
+                                                 "p_YesXGB"="Gradient Boosted Tress",
+                                                 "p_YesRF"="Random forest"))
+
+names(dt_g)[1]<-"Model"
+custom_col <- c("#B3B3B3","#787878","#D6D6D6","#636363","#000000")
+
+dt_g$midpoint_100<-dt_g$midpoint/100
+dt_g$Percent_100<-dt_g$Percent/100
+
+ggplot(dt_g,aes(x=midpoint_100,y=Percent_100, fill=Model,
+                color = Model, linetype = Model)) +
+  geom_abline(intercept = 0, slope = 1, color = "black", size = 0.5) +
+  geom_line(size = 0.5) +
+  scale_color_manual(values = custom_col) +
+  scale_linetype_manual(values = c(1,3,4,7,2))+
+  geom_point(size=0.9, color="#636363") +
+  theme_classic() +
+  theme(legend.position="top")+
+  xlab("estimated probability") +
+  ylab("observed event percentage") +
+  scale_x_continuous(limits=c(0,1), breaks = seq(0, 1, .10)) +
+  scale_y_continuous(limits=c(0,1), breaks = seq(0, 1, .10))
+```
+
+- Hosmer-Lemeshow test
+```{r}
+hoslem.test(lift_results1$Class,lift_results1$p_YesLR)
+hoslem.test(lift_results1$Class,lift_results1$p_YesGLMNET)
+hoslem.test(lift_results1$Class,lift_results1$p_NNET)
+hoslem.test(lift_results1$Class,lift_results1$p_YesXGB)
+hoslem.test(lift_results1$Class,lift_results1$p_YesRF)
+```
+
+# Variable importance
+```{r}
+#logreg
+varimp_LR<-varImp(logreg)
+plot(varimp_LR, top=10,scales=list(y=list(cex=.95)))
+
+#glmnet
+varimp_glmnet<-varImp(glmnetModel)
+plot(varimp_glmnet, top=10,scales=list(y=list(cex=.95)))
+
+#nnet
+varimp_nnet<-varImp(nnetModel)
+plot(varimp_nnet, top=10,scales=list(y=list(cex=.95)))
+
+#xgb
+varimp_xgb<-varImp(XGBmodel)
+plot(varimp_xgb, top=10,scales=list(y=list(cex=.95)))
+
+#rf
+varimp_rf<-varImp(RFmodel)
+plot(varimp_rf, top=10,scales=list(y=list(cex=.95)))
+```
+

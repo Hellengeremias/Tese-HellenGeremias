@@ -1,0 +1,784 @@
+---
+title: "Tutorial_ML_pesquisa_saude"
+author: "Hellen Geremias dos Santos"
+date: "4 de maio de 2018"
+output: html_document
+---
+
+# Pacotes
+```{r}
+library(caret)
+library(psych)
+library(corrplot)
+library(e1071)
+library(tidyverse)
+library(reshape2)
+library(plyr)
+library(pROC)
+library(ROCR)
+library (epitools)
+library(RcmdrMisc)
+library(epiDisplay)
+```
+
+# Banco de dados
+```{r}
+inicial_data<-read.csv2("bancoSABE_tutorial.csv", header=T)
+```
+
+# Analise descritiva
+```{r}
+summary(inicial_data)
+summary(dplyr::filter(inicial_data, morte_5anos=="1"))
+summary(dplyr::filter(inicial_data, morte_5anos=="0"))
+
+#idade
+sd(inicial_data$idade[inicial_data$morte_5anos==1])
+sd(inicial_data$idade[inicial_data$morte_5anos==0])
+
+#IMC
+sd(inicial_data$imc_novo[inicial_data$morte_5anos==1], na.rm = T)
+sd(inicial_data$imc_novo[inicial_data$morte_5anos==0], na.rm=T)
+
+#autopercepcao de saude
+table(data$c01_rec,useNA = "always")
+round((prop.table(table(data$c01_rec,useNA = "always")))*100,1)
+
+table(data$c01_rec[data$morte_5anos=="1"],useNA = "always")
+round((prop.table(table(data$c01_rec[data$morte_5anos=="1"],useNA = "always")))*100,1)
+
+table(data$c01_rec[data$morte_5anos=="0"],useNA = "always")
+round((prop.table(table(data$c01_rec[data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#sexo
+round((prop.table(table(inicial_data$sexo,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$sexo[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$sexo[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#escolaridade
+round((prop.table(table(inicial_data$a06anos_cat,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$a06anos_cat[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$a06anos_cat[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#percepcao de renda
+round((prop.table(table(inicial_data$h30,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$h30[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$h30[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#vive sozinho
+round((prop.table(table(inicial_data$a07,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$a07[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$a07[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#tabagismo
+round((prop.table(table(inicial_data$c24,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c24[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c24[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#alcool
+round((prop.table(table(inicial_data$c23_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c23_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c23_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#n refeicoes
+round((prop.table(table(inicial_data$c22a,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c22a[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c22a[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#HA
+round((prop.table(table(inicial_data$c04_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c04_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c04_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#DM
+round((prop.table(table(inicial_data$c05_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c05_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c05_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#cancer
+round((prop.table(table(inicial_data$c06_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c06_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c06_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#doenca pulmonar
+round((prop.table(table(inicial_data$c07_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c07_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c07_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#AVC
+round((prop.table(table(inicial_data$c09_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c09_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c09_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#doenca cardiaca
+round((prop.table(table(inicial_data$c08_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c08_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c08_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#problema psiquiatrico
+round((prop.table(table(inicial_data$c20_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c20_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c20_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#queda
+round((prop.table(table(inicial_data$c11_rec2,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c11_rec2[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$c11_rec2[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#mini mental
+round((prop.table(table(inicial_data$minimental,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$minimental[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$minimental[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+##mobilidade
+#d01b
+round((prop.table(table(inicial_data$d01b,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d01b[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d01b[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d03
+round((prop.table(table(inicial_data$d03,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d03[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d03[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d04
+round((prop.table(table(inicial_data$d04,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d04[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d04[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d06
+round((prop.table(table(inicial_data$d06,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d06[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d06[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d07
+round((prop.table(table(inicial_data$d07,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d07[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d07[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d08
+round((prop.table(table(inicial_data$d08,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d08[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d08[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d09
+round((prop.table(table(inicial_data$d09,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d09[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d09[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d10
+round((prop.table(table(inicial_data$d10,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d10[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d10[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+###Estado funcional
+##Atividades basicas
+#d13a
+round((prop.table(table(inicial_data$d13a,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d13a[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d13a[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d14a
+round((prop.table(table(inicial_data$d14a,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d14a[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d14a[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d15a
+round((prop.table(table(inicial_data$d15a,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d15a[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d15a[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d16a
+round((prop.table(table(inicial_data$d16a_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d16a_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d16a_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d17a
+round((prop.table(table(inicial_data$d17a_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d17a_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d17a_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d18a
+round((prop.table(table(inicial_data$d18a_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d18a_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d18a_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d19a
+round((prop.table(table(inicial_data$d19a_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d19a_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d19a_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d25a
+round((prop.table(table(inicial_data$d25a,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d25a[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d25a[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d23a
+round((prop.table(table(inicial_data$d23a_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d23a_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d23a_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+
+#d24a
+round((prop.table(table(inicial_data$d24a_rec,useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d24a_rec[inicial_data$morte_5anos=="1"],useNA = "always")))*100,1)
+round((prop.table(table(inicial_data$d24a_rec[inicial_data$morte_5anos=="0"],useNA = "always")))*100,1)
+```
+
+# Treinamento
+
+- Tecnica de reamostram para evitar sobreajuste
+```{r, message=F,results='hide',warning=F, cache=T}
+fiveStats<-function(...)c(twoClassSummary(...),defaultSummary(...))
+
+set.seed(1)
+ctrl <- trainControl(method = "repeatedcv",
+                     number=10,
+                     repeats = 10,
+                     savePredictions=TRUE,
+                     classProbs = TRUE,
+                     summaryFunction = fiveStats,
+                     verboseIter = TRUE)
+```
+
+- separacao treinamento-teste
+```{r,message=F,results='hide',warning=F, cache=T}
+#retirar missing de variaveis categoricas (exceto queda e escolaridade)
+final_data<-data_red2[complete.cases(inicial_data[,5:ncol(inicial_data)]),]
+
+#stratified random sampling
+#first, split the training set off
+set.seed(1)
+split1<-createDataPartition(final_data$morte_5anos, p=.7)[[1]]
+data_teste<-final_data[-split1,]
+data_training<-final_data[split1,]
+prop.table(table(data_teste$morte_5anos))
+prop.table(table(data_training$morte_5anos))
+```
+
+- Organizacao dos bancos de dados de treinamento e teste
+```{r}
+#imputacao de dados - variavel quantitativa - IMC
+mediana_IMC<-median(data_training$imc_novo,na.rm = T)
+
+teste<-NULL
+n=nrow(data_training)
+i=1
+for(i in 1:n){
+  teste[i]<-is.na(data_training$imc_novo[i])
+  ifelse (teste[i]==TRUE,data_training$imc_novo_imp[i]<-mediana_IMC,data_training$imc_novo_imp[i]<-data_training$imc_novo[i])
+}
+
+X_1 = select(data_training,-c(morte_5anos,imc_novo,idade,imc_novo_imp))
+X_quanti<-select(data_training,c(idade,imc_novo_imp))
+scale_var<-preProcess(X_quanti,method = c("center","scale"))
+X_scale<-predict(scale_var,X_quanti)
+X<-cbind(X_1,X_scale)
+
+Y = select(data_training,morte_5anos)
+trainData<-cbind(Y,X)
+names(trainData)[1]<-"Y"
+
+trainData$Y<-plyr::revalue(trainData$Y,c("0"="Nao","1"="Sim"))
+trainData$Y<-relevel(trainData$Y,ref = "Sim")
+
+#---------------------------------------------------------------------------------------------
+#Organizacao banco_teste - Imputacao de dados - variavel quantitativa - IMC
+mediana_IMC<-median(data_training$imc_novo,na.rm = T)
+
+teste<-NULL
+n=nrow(data_teste)
+i=1
+for(i in 1:n){
+  teste[i]<-is.na(data_teste$imc_novo[i])
+  ifelse (teste[i]==TRUE,data_teste$imc_novo_imp[i]<-mediana_IMC,data_teste$imc_novo_imp[i]<-data_teste$imc_novo[i])
+}
+
+X1_holdout = select(data_teste,-c(morte_5anos,imc_novo,idade,imc_novo_imp))
+X_holdout_quanti<-select(data_teste,c(idade,imc_novo_imp))
+X_holdout_scale<-predict(scale_var,X_holdout_quanti)
+X_holdout<-cbind(X1_holdout,X_holdout_scale)
+
+Y_holdout = select(data_teste,morte_5anos)
+
+testData<-cbind(Y_holdout,X_holdout)
+names(testData)[1]<-"Y_holdout"
+
+testData$Y_holdout<-plyr::revalue(testData$Y_holdout,c("0"="Nao","1"="Sim"))
+testData$Y_holdout<-relevel(testData$Y_holdout,ref = "Sim")  
+```
+
+- Otimização de hiperparametros
+```{r}
+#Regressao Logistica
+set.seed(1)
+reglog <- train(Y ~ ., data=trainData,
+                method="glm",
+                trControl=trainControl(method = "none",savePredictions=TRUE,
+                     classProbs = TRUE,summaryFunction = fiveStats),
+                family="binomial",
+                metric="ROC")
+
+Results_RL1<-reglog$results
+Pred_RL1<-reglog$pred
+  
+predicao_probRL <- predict(reglog,select(testData,-Y_holdout),type="prob")
+p_YesRL1 <- predicao_probRL[,"Sim"]
+
+predicao_probRL_treino <- predict(reglog,select(trainData,-Y),type="prob")
+p_YesRL1_treino <- predicao_probRL_treino[,"Sim"]
+
+#-----------------------------------------------------------------
+#Regressao Logistica Penalizada
+glmnetGRID<-expand.grid(.alpha=c(0,0.5,1),
+                        .lambda=c(0.003,0.03,0.05,0.1))
+set.seed(1)
+glmnetModel <- train(Y ~ ., data=trainData,
+                    method="glmnet",
+                    trControl=ctrl,
+                    tuneGrid=glmnetGRID,
+                    metric="ROC")
+
+Results_GLMNET1<-glmnetModel$results
+Pred_GLMNET1<-glmnetModel$pred
+
+predicao_probGLMNET <- predict(glmnetModel,select(testData,-Y_holdout),type="prob")
+p_YesGLMNET1 <- predicao_probGLMNET[,"Sim"]
+
+
+#-----------------------------------------------------------------
+#Redes Neurais
+nnetGRID<-expand.grid(.size=c(1,2,3),
+                      .decay=c(0.1,0.3,0.5,2))
+
+set.seed(1)
+nnetModel <- train(Y ~ ., data=trainData,
+                   method="nnet",
+                   trControl=ctrl,
+                   tuneGrid = nnetGRID,
+                   metric="ROC")
+
+Results_NNET1<-nnetModel$results
+Pred_NNET1<-nnetModel$pred
+
+predicao_probNNET <- predict(nnetModel,select(testData,-Y_holdout),type="prob")
+p_YesNNET1 <- predicao_probNNET[,"Sim"]
+
+#-----------------------------------------------------------------
+#Boosting
+xgbGRID<-expand.grid(.nrounds=c(50,100,150,300),
+                     .max_depth=c(1,2,3,4,5,6),
+                     .eta=c(0.01,0.05,0.1,0.2,0.3),
+                     .gamma=0,
+                     .colsample_bytree=1,
+                     .min_child_weight=1,
+                     .subsample=1)
+
+set.seed(1)
+boostModel <- train(Y ~ ., data=trainData,
+                    method="xgbTree",
+                    tuneGrid=xgbGRID,
+                    trControl=ctrl,
+                    metric="ROC")
+
+Results_BOOST1<-boostModel$results
+Pred_BOOST1<-boostModel$pred
+
+predicao_probBOOST <- predict(boostModel,select(testData,-Y_holdout),type="prob")
+p_YesBOOST1 <- predicao_probBOOST[,"Sim"]
+
+#-----------------------------------------------------------------
+#Random Forest
+rfgrid<-expand.grid(.mtry=c(2,4,5,6,7,8,9,10))
+
+set.seed(1)
+rfModel <- train(Y ~ ., data=trainData,
+               method="rf",
+               trControl=ctrl,
+               tuneGrid=rfgrid,
+               metric="ROC",
+               importance=T)
+
+Results_RF1<-rfModel$results
+Pred_RF1<-rfModel$pred
+
+predicao_probRF <- predict(rfModel,select(testData,-Y_holdout),type="prob")
+p_YesRF1 <- predicao_probRF[,"Sim"]
+```
+
+- Importancia das variaveis
+```{r}
+varimp_RL<-varImp(reglog)
+varimp_GLMNET<-varImp(glmnetModel)
+varimp_NNET<-varImp(nnetModel)
+varimp_BOOST<-varImp(boostModel)
+varimp_RF<-varImp(rfModel)
+
+varimp_RL
+varimp_GLMNET
+varimp_NNET
+varimp_BOOST
+varimp_RF
+```
+
+- Resultados do processo de reamostragem
+```{r}
+Results_RL1
+Results_GLMNET1[order(Results_GLMNET1$ROC,decreasing = T),]
+Results_NNET1[order(Results_NNET1$ROC,decreasing = T),]
+Results_BOOST1[order(Results_BOOST1$ROC,decreasing = T),]
+Results_RF1[order(Results_RF1$ROC,decreasing = T),]
+```
+
+# Teste: avaliacao de performance
+
+- Figuras AUC ROC
+```{r}
+#Regressao logistica
+rocCurveRL1 <- roc(response = testData$Y_holdout, 
+                  predictor = p_YesRL1,
+                  levels = rev(levels(testData$Y_holdout)))
+
+AUC_rl1<-pROC::auc(rocCurveRL1)
+AUC_rl1
+IC_AUC_rl1<-pROC::ci.auc(rocCurveRL1)
+IC_AUC_rl1
+plot(rocCurveRL1)
+
+rocCurveRL1_treino <- roc(response = trainData$Y, 
+                  predictor = p_YesRL1_treino,
+                  levels = rev(levels(trainData$Y)))
+
+AUC_rl1_treino<-pROC::auc(rocCurveRL1_treino)
+AUC_rl1_treino
+IC_AUC_rl1_treino<-pROC::ci.auc(rocCurveRL1_treino)
+IC_AUC_rl1_treino
+plot(rocCurveRL1_treino)
+
+pROC::ci.se(rocCurveRL1_treino)
+#-----------------------------------------------------------------
+#GLMNET
+rocCurveGLMNET1 <- roc(response = testData$Y_holdout, 
+                      predictor = p_YesGLMNET1, 
+                      levels = rev(levels(testData$Y_holdout)))
+
+AUC_glmnet1<-pROC::auc(rocCurveGLMNET1)
+AUC_glmnet1
+IC_AUC_glmnet1<-pROC::ci.auc(rocCurveGLMNET1)
+IC_AUC_glmnet1
+plot(rocCurveGLMNET1)
+
+#-----------------------------------------------------------------
+#Redes neurais
+rocCurveNNET1 <- roc(response = testData$Y_holdout, 
+                    predictor = p_YesNNET1, 
+                    levels = rev(levels(testData$Y_holdout)))
+
+AUC_nnet1<-pROC::auc(rocCurveNNET1)
+AUC_nnet1
+IC_AUC_nnet1<-pROC::ci.auc(rocCurveNNET1)
+IC_AUC_nnet1
+plot(rocCurveNNET1)
+
+#-----------------------------------------------------------------
+#Gradient boosted trees
+rocCurveXGB1 <- roc(response = testData$Y_holdout, 
+                   predictor = p_YesBOOST1, 
+                   levels = rev(levels(testData$Y_holdout)))
+
+AUC_xgb1<-pROC::auc(rocCurveXGB1)
+AUC_xgb1
+IC_AUC_xgb1<-pROC::ci.auc(rocCurveXGB1)
+IC_AUC_xgb1
+plot(rocCurveXGB1)
+
+#-----------------------------------------------------------------
+#Random forest
+rocCurveRF1 <- roc(response = testData$Y_holdout, 
+                  predictor = p_YesRF1, 
+                  levels = rev(levels(testData$Y_holdout)))
+
+AUC_rf1<-pROC::auc(rocCurveRF1)
+AUC_rf1
+IC_AUC_rf1<-pROC::ci.auc(rocCurveRF1)
+IC_AUC_rf1
+plot(rocCurveRF1)
+```
+
+- Tabela AUC e IC95%
+```{r,message=F,warning=F, cache=T}
+AUC1<-as.data.frame(rbind(AUC_rl1,AUC_glmnet1,AUC_nnet1,AUC_xgb1,AUC_rf1),row.names=F)
+names(AUC1)[1]<-"AUC"
+
+IC_AUC1<-as.data.frame(rbind(IC_AUC_rl1,IC_AUC_glmnet1,IC_AUC_nnet1,IC_AUC_xgb1,IC_AUC_rf1),row.names=F)
+
+names(IC_AUC1)[1:3]<-c("int_INF","AUC","int_SUP")
+IC_AUC1<-dplyr::select(IC_AUC1,-AUC)
+
+Algorithm1<-c("RL","GLMNET","NNET","Boosting","RF")
+
+performance1<-cbind(Algorithm1,AUC1,IC_AUC1)
+performance1[order(performance1$AUC,decreasing = T),]
+```
+
+- Matriz de confusao
+```{r}
+#Predicao em dados de teste
+classPredRL <- predict(reglog, newdata=select(testData,-Y_holdout))
+
+#matriz de confusao p=0,5
+confMatRL <- confusionMatrix( classPredRL,testData$Y_holdout)
+confMatRL
+
+#matriz de confusao p otimo
+treshRL<-coords(rocCurveRL1, x="best",best.method = "closest.topleft")
+
+newValueRL <- factor(ifelse(p_YesRL1 > treshRL[1], "Sim", "Nao"),
+                     levels = levels(testData[,1]))
+
+confusionMatrix(data = newValueRL, 
+                reference = testData[,1], 
+                positive = "Sim")
+
+#--------------------------------------------------------------------------
+#Predicao em dados de teste
+classPredGLMNET <- predict(glmnetModel, newdata=select(testData,-Y_holdout))
+
+#matriz de confusao p=0,5
+confMatGLMNET <- confusionMatrix(classPredGLMNET,testData$Y_holdout)
+confMatGLMNET
+
+#matriz de confusao p otimo
+treshGLMNET<-coords(rocCurveGLMNET1, x="best",best.method = "closest.topleft")
+
+newValueGLMNET <- factor(ifelse(p_YesGLMNET1 > treshGLMNET[1], "Sim", "Nao"),
+                         levels = levels(testData[,1]))
+
+confusionMatrix(data = newValueGLMNET, 
+                reference = testData[,1], 
+                positive = "Sim")
+
+#--------------------------------------------------------------------------
+#Predicao em dados de teste
+classPredNNET <- predict(nnetModel, newdata=select(testData,-Y_holdout))
+
+#matriz de confusao p=0,5
+confMatNNET <- confusionMatrix(classPredNNET,testData$Y_holdout)
+confMatNNET
+
+#matriz de confusao p otimo
+treshNNET<-coords(rocCurveNNET1, x="best",best.method = "closest.topleft")
+
+newValueNNET <- factor(ifelse(p_YesNNET1 > treshNNET[1], "Sim", "Nao"),
+                       levels = levels(testData[,1]))
+
+confusionMatrix(data = newValueNNET, 
+                reference = testData[,1], 
+                positive = "Sim")
+
+#--------------------------------------------------------------------------
+#Predicao em dados de teste
+classPredXGB <- predict(boostModel, newdata=select(testData,-Y_holdout))
+
+#matriz de confusao p=0,5
+confMatXGB <- confusionMatrix(classPredXGB,testData$Y_holdout)
+confMatXGB
+
+#matriz de confusao p otimo
+treshXGB<-coords(rocCurveXGB1, x="best",best.method = "closest.topleft")
+
+newValueXGB <- factor(ifelse(p_YesBOOST1 > treshXGB[1], "Sim", "Nao"),
+                      levels = levels(testData[,1]))
+
+confusionMatrix(data = newValueXGB, 
+                reference = testData[,1], 
+                positive = "Sim")
+
+#--------------------------------------------------------------------------
+#Predicao em dados de teste
+classPredRF <- predict(rfModel, newdata=select(testData,-Y_holdout))
+
+#matriz de confusao p=0,5
+confMatRF <- confusionMatrix(classPredRF,testData$Y_holdout)
+confMatRF
+
+#matriz de confusao p otimo
+treshRF<-coords(rocCurveRF1, x="best",best.method = "closest.topleft")
+
+newValueRF<-factor(ifelse(p_YesRF1 > treshRF[1], "Sim", "Nao"),
+                   levels = levels(testData[,1]))
+
+confusionMatrix(data = newValueRF, 
+                reference = testData[,1], 
+                positive = "Sim")
+```
+
+- % Risco predito mais alto/baixo
+```{r}
+#Regressao Logistica
+df_RL<-as.data.frame(cbind(testData$Y_holdout,p_YesRL1))
+table(df_RL$V1)
+
+#10% maior risco
+df_RL2<-df_RL[order(df_RL$p_YesRL1, decreasing = T),]
+df_RL2_10<-df_RL2[1:round(.10*nrow(df_RL2),0),]
+dim(df_RL2_10)
+table(df_RL2_10$V1)
+
+round(100*(table(df_RL2_10$V1)[1]/table(df_RL$V1)[1]),3)
+
+#10% menor risco
+df_RL3<-df_RL[order(df_RL$p_YesRL1),]
+df_RL3_10<-df_RL3[1:round(.25*nrow(df_RL3),0),]
+table(df_RL3_10$V1)
+
+#-----------------------------------------------------------------
+#Regressao Logistica Penalizada
+df_GLMNET<-as.data.frame(cbind(testData$Y_holdout,p_YesGLMNET1))
+
+#10% maior risco
+df_GLMNET2<-df_GLMNET[order(df_GLMNET$p_YesGLMNET1, decreasing = T),]
+df_GLMNET2_10<-df_GLMNET2[1:round(.10*nrow(df_RL),0),]
+round(100*(table(df_GLMNET2_10$V1)[1]/table(df_GLMNET$V1)[1]),3)
+
+#10% menor risco
+df_GLMNET3<-df_GLMNET[order(df_GLMNET$p_YesGLMNET1),]
+df_GLMNET3_10<-df_GLMNET3[1:round(.10*nrow(df_RL),0),]
+table(df_GLMNET3_10$V1)
+
+#-----------------------------------------------------------------
+#Redes Neurais
+df_NNET<-as.data.frame(cbind(testData$Y_holdout,p_YesNNET1))
+
+#10% maior risco
+df_NNET2<-df_NNET[order(df_NNET$p_YesNNET1, decreasing = T),]
+df_NNET2_10<-df_NNET2[1:round(.10*nrow(df_RL),0),]
+round(100*(table(df_NNET2_10$V1)[1]/table(df_NNET$V1)[1]),3)
+
+#10% menor risco
+df_NNET3<-df_NNET[order(df_NNET$p_YesNNET1),]
+df_NNET3_10<-df_NNET3[1:round(.10*nrow(df_RL),0),]
+table(df_NNET3_10$V1)
+
+#-----------------------------------------------------------------
+#Boosting
+df_BOOST<-as.data.frame(cbind(testData$Y_holdout,p_YesBOOST1))
+
+#10% maior risco
+df_BOOST2<-df_BOOST[order(df_BOOST$p_YesBOOST1, decreasing = T),]
+df_BOOST2_10<-df_BOOST2[1:round(.10*nrow(df_RL),0),]
+round(100*(table(df_BOOST2_10$V1)[1]/table(df_BOOST$V1)[1]),3)
+
+#10% menor risco
+df_BOOST3<-df_BOOST[order(df_BOOST$p_YesBOOST1),]
+df_BOOST3_10<-df_BOOST3[1:round(.10*nrow(df_RL),0),]
+round(100*(table(df_BOOST3_10$V1)[1]/table(df_BOOST$V1)[1]),3)
+
+#-----------------------------------------------------------------
+#Random Forest
+df_RF<-as.data.frame(cbind(testData$Y_holdout,p_YesRF1))
+
+#d10% maior risco
+df_RF2<-df_RF[order(df_RF$p_YesRF1, decreasing = T),]
+df_RF2_10<-df_RF2[1:round(.10*nrow(df_RL),0),]
+round(100*(table(df_RF2_10$V1)[1]/table(df_RF$V1)[1]),3)
+
+#10% menor risco
+df_RF3<-df_RF[order(df_RF$p_YesRF1),]
+df_RF3_10<-df_RF3[1:round(.10*nrow(df_RL),0),]
+round(100*(table(df_RF3_10$V1)[1]/table(df_RF$V1)[1]),3)
+```
+
+- Curvas de calibracao
+```{r}
+trellis.par.set(caretTheme())
+lift_results1<-data.frame(testData$Y_holdout,p_YesRL1,p_YesGLMNET1,
+                          p_YesNNET1,p_YesBOOST1,p_YesRF1)
+testData$Y_holdout
+head(lift_results1)
+names(lift_results1)[1]<-"Class"
+
+#--------------------------------------------------------------------------
+cal_obj <- calibration(Class ~ p_YesGLMNET1 + p_YesRL1 + p_YesNNET1,
+                       data = lift_results1,
+                       cuts = 10)
+
+#--------------------------------------------------------------------------
+#apenas os TOP 3
+dt_g<-as.data.frame(cal_obj$data)
+dt_g$calibModelVar<-revalue(dt_g$calibModelVar,c("p_YesGLMNET1"="Regressão Logística Penalizada",
+                                                 "p_YesRL1"="Regressão Logística",
+                                                 "p_YesNNET1"="Rede Neural"))
+
+custom_col <- c("#636363","#000000","#B3B3B3")
+
+ggplot(dt_g,aes(x=midpoint,y=Percent, fill=calibModelVar,
+                color = calibModelVar, linetype = calibModelVar)) +
+  geom_abline(intercept = 0, slope = 1, color = "gray", size = 0.5) +
+  geom_line(size = 0.5) +
+  scale_color_manual(values = custom_col) +
+  geom_point(size=0.9, color="#636363") +
+  theme_classic() +
+  theme(legend.position="top")+
+  xlab("probabilidade estimada") +
+  ylab("porcentagem de eventos observados") +
+  scale_x_continuous(limits=c(0,100), breaks = seq(0, 100, 10)) +
+  scale_y_continuous(limits=c(0,100), breaks = seq(0, 100, 10))
+ 
+```
+
+- Distribuicao das probabilidades preditas segundo a variavel resposta
+```{r}
+binsize <- diff(range(df_RL3$p_YesRL1))/20
+
+ggplot(df_RL3, aes(x=p_YesRL1, fill=V1)) +
+       stat_bin(aes(y = ..density..),
+       binwidth = binsize, position="identity", alpha=0.4) +
+       labs(fill="Óbito") +
+       scale_fill_manual(values=c("#636363","#A8A8A8"),labels=c("Sim","Nao")) +
+       theme_classic() +
+       ylab("densidade") +
+       xlab ("probabilidade estimada")+
+       scale_x_continuous(limits=c(0,1),breaks = seq(0, 1, 0.10)) +
+       scale_y_continuous(limits=c(0,10))
+
+#--------------------------------------------------------------------------
+binsize <- diff(range(df_GLMNET3$p_YesGLMNET1))/20
+
+ggplot(df_GLMNET3, aes(x=p_YesGLMNET1, fill=V1)) +
+       stat_bin(aes(y = ..density..),
+       binwidth = binsize, position="identity", alpha=0.4) +
+       labs(fill="Óbito") +
+       scale_fill_manual(values=c("#636363","#A8A8A8"),labels=c("Sim","Nao")) +
+       theme_classic() +
+       ylab("densidade") +
+       xlab ("probabilidade estimada")+
+       scale_x_continuous(limits=c(0,1),breaks = seq(0, 1, 0.10)) +
+       scale_y_continuous(limits=c(0,10))
+
+#--------------------------------------------------------------------------
+binsize <- diff(range(df_NNET3$p_YesNNET1))/20
+
+ggplot(df_NNET3, aes(x=p_YesNNET1, fill=V1)) +
+       stat_bin(aes(y = ..density..),
+       binwidth = binsize, position="identity", alpha=0.4) +
+       labs(fill="Óbito") +
+       scale_fill_manual(values=c("#636363","#A8A8A8"),labels=c("Sim","Nao")) +
+       theme_classic() +
+       ylab("densidade") +
+       xlab ("probabilidade estimada")+
+       scale_x_continuous(limits=c(0,1),breaks = seq(0, 1, 0.10)) +
+       scale_y_continuous(limits=c(0,10))
+
+#--------------------------------------------------------------------------
+numSummary(df_RL3$p_YesRL1, groups=df_RL3$V1,
+statistics=c("mean", "sd", "IQR", "quantiles"),
+quantiles=c(0,.25,.5,.75,1))
+
+numSummary(df_GLMNET3$p_YesGLMNET1, groups=df_GLMNET3$V1,
+statistics=c("mean", "sd", "IQR", "quantiles"),
+quantiles=c(0,.25,.5,.75,1))
+
+numSummary(df_NNET3$p_YesNNET1, groups=df_NNET3$V1,
+statistics=c("mean", "sd", "IQR", "quantiles"),
+quantiles=c(0,.25,.5,.75,1))
+```

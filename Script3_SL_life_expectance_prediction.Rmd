@@ -1,0 +1,1075 @@
+---
+title: "Life_Expectance_SL_prediction"
+author: "Hellen Geremias dos Santos"
+date: "4 de maio de 2018"
+output: html_document
+---
+
+# Packages
+```{r}
+library(tidyverse)
+library(caret)
+library(hydroGOF)
+library(SuperLearner)
+library(ggplot2)
+library(dummies)
+library(reshape)
+library(dplyr)
+library(plyr)
+library(RhpcBLASctl)
+```
+
+# Data set to develop predictive life expectance model
+```{r}
+data_set1 <- read.table ("Data_set_socioeconomic_characteristics.csv", 
+                     header = T ,sep=';', dec='.',colClass=c(rep("numeric",37), "factor"))
+str(data_set1)
+
+#Filter: municipalities with more than 10,000 residents
+filter_data <- data_set1 %>% 
+               filter(Residents > 10000)
+
+summary(filter_data)
+```
+
+# Pre-process
+```{r}
+#Standardization
+nums <- sapply(filter_data, is.numeric)
+quantis <- filter_data[,nums]
+quantis_filter <- select(quantis, -c(Municipality_code)) 
+scale_variables <- preProcess(quantis_filter, method = c("center", "scale"))
+quantis_scale <- predict(scale_variables,quantis_filter)
+head(quantis_scale)
+
+#Indicator variables
+State<-filter_data$State_of_residence
+df_State <- dummy(State, sep="_")
+df_State<-as.data.frame(df_State)
+head(df_State)
+
+#final_data
+final_data <- cbind(quantis$Municipality_code,quantis$Life_expectance,quantis_scale, dplyr::select(df_State, -State_SP))
+names(final_data)[1]<-"Municipality_code"
+names(final_data)[2]<-"original_LE"
+
+#---------------------------------------------------------------------------------------------------
+set.seed(1)
+final_data_sort<-sample_n(final_data, nrow(final_data), replace=FALSE)
+final_data_sort$position<-seq(1:3052)
+head(final_data_sort)
+```
+
+# Training steps using SuperLearner package
+
+- Step 1: combining Super Learner with the caret package
+```{r}
+#Observations: the SuperLearner package provides the function SL.caret which allows you to include algorithms in the Super Learner that implicitly use cross-validation.
+#I used a slight modification to this function, wrote by David Benkeser(http://benkeser.github.io/sllecture/).
+#Additionally,I modified "tuneLength" to "tuneGrid" and, for neural network, I add "linout=TRUE" when regression is of interest.
+
+SL.caret1 <- function (Y, X, newX, family, obsWeights, method = "rf", tuneGrid = tuneGrid, 
+                       trControl = trainControl(method = "cv",
+                                                number = 10,
+                                                verboseIter = FALSE,
+                                                savePredictions=TRUE), 
+                       metric,...) 
+{
+  if (length(unique(Y))>2){
+    if(is.matrix(Y)) Y <- as.numeric(Y)
+    metric <- "RMSE"
+    if(method=="gbm"){
+      suppressWarnings(
+        # pass verbose==FALSE directly to train (verboseIter doesn't suppress output)
+        fit.train <- caret::train(x = X, y = Y, weights = obsWeights, 
+                                  metric = metric, method = method, 
+                                  tuneGrid = tuneGrid, 
+                                  trControl = trControl,verbose=FALSE)
+      )
+    }else{
+      suppressWarnings(
+        fit.train <- caret::train(x = X, y = Y, weights = obsWeights, 
+                                  metric = metric, method = method, 
+                                  tuneGrid = tuneGrid, 
+                                  trControl = trControl)
+      )
+    }
+    if(method=="nnet"){
+        fit.train <- caret::train(x = X, y = Y, weights = obsWeights, 
+                                  metric = metric, method = method, 
+                                  tuneGrid = tuneGrid, 
+                                  trControl = trControl,linout=TRUE)
+    }else{
+      fit.train <- caret::train(x = X, y = Y, weights = obsWeights, 
+                                  metric = metric, method = method, 
+                                  tuneGrid = tuneGrid, 
+                                  trControl = trControl)
+    }
+    pred <- predict(fit.train, newdata = newX, type = "raw")
+  }
+  if (length(unique(Y))<=2) {
+    metric <- "Accuracy"
+    Y.f <- as.factor(Y)
+    levels(Y.f) <- c("A0", "A1")
+    if(method=="gbm"){
+      suppressWarnings(
+        # pass verbose==FALSE directly to train (verboseIter doesn't 
+        # suppress output)
+        fit.train <- caret::train(x = X, y = Y.f, weights = obsWeights,
+                                  metric = metric, method = method, 
+                                  tuneGrid = tuneGrid, 
+                                  trControl = trControl, verbose = FALSE)
+      )
+    }else{
+      suppressWarnings(
+        fit.train <- caret::train(x = X, y = Y, weights = obsWeights, 
+                                  metric = metric, method = method, 
+                                  tuneGrid = tuneGrid, 
+                                  trControl = trControl)
+      )
+    }
+    pred <- predict(fit.train, newdata = newX, type = "prob")[,2]
+  }
+  fit <- list(object = fit.train)
+  out <- list(pred = pred, fit = fit)
+  class(out$fit) <- c("SL.caret")
+  return(out)
+}
+```
+
+- Step 2: algorithms inside caret
+```{r}
+#Uses ten-fold cross validation to select tuning parameters 
+#We must define SL.<algorithm>.caret1
+
+#----------------------------------------
+#***Linear models***
+#----------------------------------------
+#Ridge
+SL.ridge.caret <- function(...,method = "ridge",
+                           tuneGrid = expand.grid(.lambda = seq(0, .01, length = 10)),
+                           trControl = trainControl(method = "cv",
+                                                    repeats = 10,
+                                                    verboseIter = FALSE,
+                                                    savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#Lasso
+SL.lasso.caret <- function(...,method = "lasso",
+                           tuneGrid = expand.grid(.fraction = seq(.5, 1, length = 10)),
+                           trControl = trainControl(method = "cv",
+                                                    number =  10,
+                                                    verboseIter = FALSE,
+                                                    savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#Elastic Net
+SL.enet.caret <- function(...,method = "enet",
+                          tuneGrid = expand.grid(.lambda = seq(0, 0.1, length = 10),
+                                                 .fraction = seq(.5, 1, length = 10)),
+                          trControl = trainControl(method = "cv",
+                                                   number = 10,
+                                                   verboseIter = FALSE,
+                                                   savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#Partial Least Squares
+SL.pls.caret <- function(...,method ="pls",
+                         tuneGrid = expand.grid(.ncomp = c(1:28)),
+                         trControl = trainControl(method = "cv",
+                                                  number = 10,
+                                                  verboseIter = FALSE,
+                                                  savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#***Non-linear models***
+#----------------------------------------
+#Neural network
+SL.nnet.caret <- function(...,method ="nnet",
+                          tuneGrid = expand.grid(.decay = seq(0,0.1,length=5),
+                                                 .size = c(1:5)),
+                          linout=TRUE,
+                          trControl = trainControl(method = "cv",
+                                                   number = 10,
+                                                   verboseIter = FALSE,
+                                                   savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#MARS
+SL.mars.caret <- function(...,method ="earth",
+                          tuneGrid = expand.grid(.degree = 1, .nprune = 2:24),
+                          trControl = trainControl(method = "cv",
+                                                   number = 10,
+                                                   verboseIter = FALSE,
+                                                   savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#SVM linear
+SL.svmL.caret <- function(...,method = "svmLinear",
+                          tuneGrid = expand.grid(.C= c(.25,.50,1,2,4)),
+                          trControl = trainControl(method = "cv",
+                                                   number = 10,
+                                                   verboseIter = FALSE,
+                                                   savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#SVM polynomial
+SL.svmP.caret <- function(...,method = "svmPoly",
+                          tuneGrid = expand.grid(.degree=c(1,2,3,4,5), 
+                                                 .scale=c(0,0.0001,0.001,0.01,0.1),
+                                                 .C=c(.25,.50,1,2,4)),
+                          trControl = trainControl(method = "cv",
+                                                   number = 10,
+                                                   verboseIter = FALSE,
+                                                   savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#SVM radial
+SL.svmR.caret <- function(...,method = "svmRadial",
+                          tuneGrid = expand.grid(.C = c(.25,.50,1,2,4),
+                                                 .sigma= c(0.001,0.002,0.004,0.006,0.01)),
+                          trControl = trainControl(method = "cv",
+                                                   number = 10,
+                                                   verboseIter = FALSE,
+                                                   savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#Knn
+SL.knn.caret <- function(...,method = "knn",
+                         tuneGrid = expand.grid(.k = 1:20),
+                         trControl = trainControl(method = "cv",
+                                                  number = 10,
+                                                  verboseIter = FALSE,
+                                                  savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#***Based-tree models***
+#----------------------------------------
+#Regression tree (.maxdepth method)
+SL.rpart.caret <- function(...,method = "rpart",
+                           tuneGrid = expand.grid(.cp=seq(0.0001,0.01,length=20)),
+                           trControl = trainControl(method = "cv",
+                                                    number = 10,
+                                                    verboseIter = FALSE,
+                                                    savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#Regression tree (.cp method)
+SL.rpart2.caret <- function(...,method = "rpart2",
+                            tuneGrid = expand.grid(.maxdepth=c(3,6,7,9,12)),
+                            trControl = trainControl(method = "cv",
+                                                     number = 10,
+                                                     verboseIter = FALSE,
+                                                     savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#Random forest
+SL.rf.caret <- function(...,method = "rf",
+                        tuneGrid = expand.grid(.mtry= c(10,20,30,35,40)),
+                        trControl = trainControl(method = "cv",
+                                                 number = 10,
+                                                 verboseIter = FALSE,
+                                                 savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#Boosting
+SL.xgb.caret <- function(...,method = "xgbTree",
+                         tuneGrid = expand.grid(.nrounds = c(50,100,150,200,250),
+                                                .max_depth = c(2,3,4,5,6),
+                                                .eta = c(0.01,0.03,0.05,0.1,0.3,0.5),
+                                                .gamma = 0, #default
+                                                .colsample_bytree = 1,#default
+                                                .min_child_weight = 1, #default
+                                                .subsample = 1), #default
+                         trControl = trainControl(method = "cv",
+                                                  number = 10,
+                                                  verboseIter = FALSE,
+                                                  savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+
+#----------------------------------------
+#Cubist
+SL.cub.caret <- function(...,method = "cubist",
+                         tuneGrid = expand.grid(.committees=c(10,17,20,22,25),
+                                                .neighbors=c(0:9)),
+                         trControl = trainControl(method = "cv",
+                                                  number = 10,
+                                                  verboseIter = FALSE,
+                                                  savePredictions = TRUE)){
+  SL.caret1(...,method = method,tuneGrid = tuneGrid, trControl = trControl)
+}
+```
+
+- Specifying the SuperLearner library of candidate algorithms
+```{r}
+#We can now implement the Super Learner.
+#Note that the run time on this Super Learner will be considerably longer due 
+#to the additional layers of cross validation.
+sl.lib <- c("SL.glm","SL.ridge.caret","SL.lasso.caret","SL.enet.caret",
+            "SL.pls.caret","SL.nnet.caret","SL.mars.caret","SL.svmL.caret",
+            "SL.svmP.caret","SL.svmR.caret","SL.knn.caret","SL.rpart.caret",
+            "SL.rpart2.caret","SL.rf.caret","SL.xgb.caret","SL.cub.caret")
+```
+
+- Training and test
+```{r}
+#We use CV.SuperLearner function to objectively evaluate the performance of
+#the SuperLearner predictions relative to those from its component methods.
+X <- select(final_data_sort,-c(Municipality_code,original_LE,Life_expectance,position))
+Y <- final_data_sort$Life_expectance
+
+#fit cross-validated Super Learner
+set.seed(1)
+cvSL <- CV.SuperLearner(Y = Y, X = X,
+                        #V specifies the number of outer CV layers used to evalute
+                        #the Super Learner (which by default uses 10-fold CV)
+                        V = 10,
+                        parallel = "multicore",
+                        family = gaussian(),
+                        method = "method.NNLS",
+                        SL.library = sl.lib)
+```
+
+- Performance evaluation
+```{r}
+plot(cvSL)
+summary(cvSL)
+
+#We can extract the weights at each CV.SuperLearner iteration and summarize its distribution.
+#function to review meta-weights (coefficients) from a CV.SuperLearner object
+review_weights = function(cvSL) {
+  meta_weights = coef(cvSL)
+  means = colMeans(meta_weights)
+  sds = apply(meta_weights, MARGIN = 2,  FUN = sd)
+  mins = apply(meta_weights, MARGIN = 2, FUN = min)
+  maxs = apply(meta_weights, MARGIN = 2, FUN = max)
+  #Combine the stats into a single matrix.
+  sl_stats = cbind("mean(weight)" = means, "sd" = sds, "min" = mins, "max" = maxs)
+  #Sort by decreasing mean weight.
+  sl_stats[order(sl_stats[, 1], decreasing = T), ]
+}
+
+review_weights(cvSL)
+
+#Review the distribution of the best single learner as external CV folds
+table(simplify2array(cvSL$whichDiscreteSL))
+```
+
+- Predicted values
+```{r}
+position<-seq(1:3052)
+
+SL_pred<-cvSL$SL.predict
+Discrete_pred<-cvSL$discreteSL.predict
+RLinear_pred<-cvSL$library.predict[,1]
+ridge_pred<-cvSL$library.predict[,2]
+lasso_pred<-cvSL$library.predict[,3]
+enet_pred<-cvSL$library.predict[,4]
+pls_pred<-cvSL$library.predict[,5]
+nnet_pred<-cvSL$library.predict[,6]
+mars_pred<-cvSL$library.predict[,7]
+svmL_pred<-cvSL$library.predict[,8]
+svmP_pred<-cvSL$library.predict[,9]
+svmR_pred<-cvSL$library.predict[,10]
+knn_pred<-cvSL$library.predict[,11]
+rpart_pred<-cvSL$library.predict[,12]
+rpart2_pred<-cvSL$library.predict[,13]
+rf_pred<-cvSL$library.predict[,14]
+xgb_pred<-cvSL$library.predict[,15]
+cub_pred<-cvSL$library.predict[,16]
+
+#predicted values data set
+data_pred<-cbind(position,SL_pred,Discrete_pred,RLinear_pred,ridge_pred,
+                 lasso_pred,enet_pred,pls_pred,nnet_pred,mars_pred,svmL_pred,
+                 svmP_pred,svmR_pred,knn_pred,rpart_pred,rpart2_pred,rf_pred,
+                 xgb_pred,cub_pred)
+
+#merge predicted values with data set used to estimate it wich contains 
+#the predictors and the original variable response
+data_all<-merge(final_data_sort,data_pred, by="position")
+head(data_all)
+```
+
+# Identifing over and underachievers
+
+- Organization of the data set
+```{r}
+#healh characteristics data set
+health_variables<-read.csv2("Health_charateristics.csv", sep=";",header = TRUE, na.strings="NA")
+names(health_variables)
+
+#merge data_all and health_variables
+newdata<-merge(data_all,health_variables,by="Municipality_code")
+
+#mean and standard deviation of variable response (life expectance)
+meanLE<-mean(as.numeric(newdata$original_LE))
+sdLE<-sd(as.numeric(newdata$original_LE))
+
+#predicted SL values in original scale of variable response 
+newdata$SL_original_value<-((newdata$SL_pred)*sdLE)+meanLE
+
+#predicted Random Forest values in original scale of variable response
+newdata$RF_original_value<-((newdata$rf_pred)*sdLE)+meanLE
+```
+
+- Orzanization of the tertiles data sets
+```{r}
+#difference between observed and predicted values according SL algorithm
+newdata$dif_O_P_SL<-newdata$original_LE-newdata$SL_original_value
+
+#difference between observed and predicted values according Random Forest algorithm
+newdata$dif_O_P_RF<-newdata$original_LE-newdata$RF_original_value
+
+#tercile of observed Life Expectance
+quantile(newdata$original_LE, c(1/3, 2/3))
+
+newdata$tertileY[newdata$original_LE<71.53 | newdata$original_LE==71.53]<-"<=T1"
+newdata$tertileY[newdata$original_LE>71.53 & (newdata$original_LE<74.63 | newdata$original_LE==74.63)]<-">T1 e <=T2"
+newdata$tertileY[newdata$original_LE>74.63]<-">T2"
+
+table(newdata$tertileY)
+
+#tertiles data sets
+data_YT1<-newdata %>% 
+  filter(tertileY=="<=T1")
+
+data_YT1T2<-newdata %>% 
+  filter(tertileY==">T1 e <=T2")
+
+data_YT2<-newdata %>% 
+  filter(tertileY==">T2")
+
+```
+
+- For results based on predicted Super Learner values
+```{r}
+#order tertiles data sets by observed-expected difference for SL algorithm
+data_YT1<-data_YT1[order(data_YT1$dif_O_P_SL),]
+data_YT1T2<-data_YT1T2[order(data_YT1T2$dif_O_P_SL),]
+data_YT2<-data_YT2[order(data_YT2$dif_O_P_SL),]
+```
+
+- eAppendix: results based on predicted Random Forest values
+```{r}
+#order tertiles data sets by observed-expected difference for Radon Forest algorithm
+data_YT1<-data_YT1[order(data_YT1$dif_O_P_RF),]
+data_YT1T2<-data_YT1T2[order(data_YT1T2$dif_O_P_RF),]
+data_YT2<-data_YT2[order(data_YT2$dif_O_P_RF),]
+```
+
+# Choose 100 over and 100 underachievers within tertiles data sets and test differences in heath characteristics
+
+- 1º Tercile
+```{r}
+overunder<-rbind(data_YT1[1:100,],data_YT1[922:1021,])
+overunder$category<-c(rep(1,100),rep(0,100))
+overunder$category<-as.factor(overunder$category)
+overunder$category<-revalue(overunder$category,c("1"="under","0"="over"))
+overunder_T1<-overunder
+
+data<-overunder_T1
+
+a<-data %>%
+  filter(category=="over")
+
+b<-data %>%
+  filter(category=="under")
+
+#Caesarean deliveries (%)
+median(a$cesarean_deliveries)
+median(b$cesarean_deliveries)
+wilcox.test(as.numeric(as.character(a$cesarean_deliveries)),
+            as.numeric(as.character(b$cesarean_deliveries)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Family Health Strategy teams per 10,000 residents
+median(a$Family_Health_Strategy_teams_per_10.000_residents)
+median(b$Family_Health_Strategy_teams_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Family_Health_Strategy_teams_per_10.000_residents)),
+            as.numeric(as.character(b$Family_Health_Strategy_teams_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Hospital beds per 10,000 residents
+median(a$Hospital_beds_per_10.000_residents)
+median(b$Hospital_beds_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Hospital_beds_per_10.000_residents)),
+            as.numeric(as.character(b$Hospital_beds_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Life support equipment per 10,000 residents
+median(a$Life_support_equipment_per_10.000_residents)
+median(b$Life_support_equipment_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Life_support_equipment_per_10.000_residents)),
+            as.numeric(as.character(b$Life_support_equipment_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Low birth weight (%)
+median(a$Low_birth_weight_...)
+median(b$Low_birth_weight_...)
+wilcox.test(as.numeric(as.character(a$Low_birth_weight_...)),
+            as.numeric(as.character(b$Low_birth_weight_...)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Mammographies per 100 women
+median(a$Mammographies_per_100_women)
+median(b$Mammographies_per_100_women)
+wilcox.test(as.numeric(as.character(a$Mammographies_per_100_women)),
+            as.numeric(as.character(b$Mammographies_per_100_women)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Oral health coverage
+median(a$Oral_Health_Strategy_coverage)
+median(b$Oral_Health_Strategy_coverage)
+wilcox.test(as.numeric(as.character(a$Oral_Health_Strategy_coverage)),
+            as.numeric(as.character(b$Oral_Health_Strategy_coverage)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Primary health coverage for poor residents (last year)
+median(a$Primary_health_coverage_for_poor_residents_.last.year.)
+median(b$Primary_health_coverage_for_poor_residents_.last.year.)
+wilcox.test(as.numeric(as.character(a$Primary_health_coverage_for_poor_residents_.last.year.)),
+            as.numeric(as.character(b$Primary_health_coverage_for_poor_residents_.last.year.)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Ultrasound machines per 10,000 live births
+median(a$Ultrasound_machines._per_10.000_live_births)
+median(b$Ultrasound_machines._per_10.000_live_births)
+wilcox.test(as.numeric(as.character(a$Ultrasound_machines._per_10.000_live_births)),
+            as.numeric(as.character(b$Ultrasound_machines._per_10.000_live_births)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Vaccination coverage (%)
+median(a$Vaccination_coverage_...)
+median(b$Vaccination_coverage_...)
+wilcox.test(as.numeric(as.character(a$Vaccination_coverage_...)),
+            as.numeric(as.character(b$Vaccination_coverage_...)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+# X-ray machines per 10,000 residents
+median(a$Xray_machines_per_10.000_residents)
+median(b$Xray_machines_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Xray_machines_per_10.000_residents)),
+            as.numeric(as.character(b$Xray_machines_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+```
+
+- 2º Tercile
+```{r}
+overunder<-rbind(data_YT1T2[1:100,],data_YT1T2[919:1018,])
+overunder$category<-c(rep(1,100),rep(0,100))
+overunder$category<-as.factor(overunder$category)
+overunder$category<-revalue(overunder$category,c("1"="under","0"="over"))
+
+overunder_T1T2<-overunder
+
+data<-overunder_T1T2
+
+a<-data %>%
+  filter(category=="over")
+
+b<-data %>%
+  filter(category=="under")
+
+#Caesarean deliveries (%)
+median(a$cesarean_deliveries)
+median(b$cesarean_deliveries)
+wilcox.test(as.numeric(as.character(a$cesarean_deliveries)),
+            as.numeric(as.character(b$cesarean_deliveries)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Family Health Strategy teams per 10,000 residents
+median(a$Family_Health_Strategy_teams_per_10.000_residents)
+median(b$Family_Health_Strategy_teams_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Family_Health_Strategy_teams_per_10.000_residents)),
+            as.numeric(as.character(b$Family_Health_Strategy_teams_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Hospital beds per 10,000 residents
+median(a$Hospital_beds_per_10.000_residents)
+median(b$Hospital_beds_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Hospital_beds_per_10.000_residents)),
+            as.numeric(as.character(b$Hospital_beds_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Life support equipment per 10,000 residents
+median(a$Life_support_equipment_per_10.000_residents)
+median(b$Life_support_equipment_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Life_support_equipment_per_10.000_residents)),
+            as.numeric(as.character(b$Life_support_equipment_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Low birth weight (%)
+median(a$Low_birth_weight_...)
+median(b$Low_birth_weight_...)
+wilcox.test(as.numeric(as.character(a$Low_birth_weight_...)),
+            as.numeric(as.character(b$Low_birth_weight_...)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Mammographies per 100 women
+median(a$Mammographies_per_100_women)
+median(b$Mammographies_per_100_women)
+wilcox.test(as.numeric(as.character(a$Mammographies_per_100_women)),
+            as.numeric(as.character(b$Mammographies_per_100_women)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Oral health coverage
+median(a$Oral_Health_Strategy_coverage)
+median(b$Oral_Health_Strategy_coverage)
+wilcox.test(as.numeric(as.character(a$Oral_Health_Strategy_coverage)),
+            as.numeric(as.character(b$Oral_Health_Strategy_coverage)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Primary health coverage for poor residents (last year)
+median(a$Primary_health_coverage_for_poor_residents_.last.year.)
+median(b$Primary_health_coverage_for_poor_residents_.last.year.)
+wilcox.test(as.numeric(as.character(a$Primary_health_coverage_for_poor_residents_.last.year.)),
+            as.numeric(as.character(b$Primary_health_coverage_for_poor_residents_.last.year.)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Ultrasound machines per 10,000 live births
+median(a$Ultrasound_machines._per_10.000_live_births)
+median(b$Ultrasound_machines._per_10.000_live_births)
+wilcox.test(as.numeric(as.character(a$Ultrasound_machines._per_10.000_live_births)),
+            as.numeric(as.character(b$Ultrasound_machines._per_10.000_live_births)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Vaccination coverage (%)
+median(a$Vaccination_coverage_...)
+median(b$Vaccination_coverage_...)
+wilcox.test(as.numeric(as.character(a$Vaccination_coverage_...)),
+            as.numeric(as.character(b$Vaccination_coverage_...)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+# X-ray machines per 10,000 residents
+median(a$Xray_machines_per_10.000_residents)
+median(b$Xray_machines_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Xray_machines_per_10.000_residents)),
+            as.numeric(as.character(b$Xray_machines_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+```
+
+3º Tercile
+```{r}
+overunder<-rbind(data_YT2[1:100,],data_YT2[914:1013,])
+overunder$category<-c(rep(1,100),rep(0,100))
+overunder$category<-as.factor(overunder$category)
+overunder$category<-revalue(overunder$category,c("1"="under","0"="over"))
+overunder_T2<-overunder
+
+data<-overunder_T2
+
+a<-data %>%
+  filter(category=="over")
+
+b<-data %>%
+  filter(category=="under")
+
+#Caesarean deliveries (%)
+median(a$cesarean_deliveries)
+median(b$cesarean_deliveries, na.rm = T)
+wilcox.test(as.numeric(as.character(a$cesarean_deliveries)),
+            as.numeric(as.character(b$cesarean_deliveries)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Family Health Strategy teams per 10,000 residents
+median(a$Family_Health_Strategy_teams_per_10.000_residents)
+median(b$Family_Health_Strategy_teams_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Family_Health_Strategy_teams_per_10.000_residents)),
+            as.numeric(as.character(b$Family_Health_Strategy_teams_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Hospital beds per 10,000 residents
+median(a$Hospital_beds_per_10.000_residents)
+median(b$Hospital_beds_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Hospital_beds_per_10.000_residents)),
+            as.numeric(as.character(b$Hospital_beds_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Life support equipment per 10,000 residents
+median(a$Life_support_equipment_per_10.000_residents)
+median(b$Life_support_equipment_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Life_support_equipment_per_10.000_residents)),
+            as.numeric(as.character(b$Life_support_equipment_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Low birth weight (%)
+median(a$Low_birth_weight_...)
+median(b$Low_birth_weight_...)
+wilcox.test(as.numeric(as.character(a$Low_birth_weight_...)),
+            as.numeric(as.character(b$Low_birth_weight_...)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Mammographies per 100 women
+median(a$Mammographies_per_100_women)
+median(b$Mammographies_per_100_women)
+wilcox.test(as.numeric(as.character(a$Mammographies_per_100_women)),
+            as.numeric(as.character(b$Mammographies_per_100_women)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Oral health coverage
+median(a$Oral_Health_Strategy_coverage)
+median(b$Oral_Health_Strategy_coverage)
+wilcox.test(as.numeric(as.character(a$Oral_Health_Strategy_coverage)),
+            as.numeric(as.character(b$Oral_Health_Strategy_coverage)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Primary health coverage for poor residents (last year)
+median(a$Primary_health_coverage_for_poor_residents_.last.year.)
+median(b$Primary_health_coverage_for_poor_residents_.last.year.)
+wilcox.test(as.numeric(as.character(a$Primary_health_coverage_for_poor_residents_.last.year.)),
+            as.numeric(as.character(b$Primary_health_coverage_for_poor_residents_.last.year.)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Ultrasound machines per 10,000 live births
+median(a$Ultrasound_machines._per_10.000_live_births)
+median(b$Ultrasound_machines._per_10.000_live_births)
+wilcox.test(as.numeric(as.character(a$Ultrasound_machines._per_10.000_live_births)),
+            as.numeric(as.character(b$Ultrasound_machines._per_10.000_live_births)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+#Vaccination coverage (%)
+median(a$Vaccination_coverage_...)
+median(b$Vaccination_coverage_...)
+wilcox.test(as.numeric(as.character(a$Vaccination_coverage_...)),
+            as.numeric(as.character(b$Vaccination_coverage_...)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+
+# X-ray machines per 10,000 residents
+median(a$Xray_machines_per_10.000_residents)
+median(b$Xray_machines_per_10.000_residents)
+wilcox.test(as.numeric(as.character(a$Xray_machines_per_10.000_residents)),
+            as.numeric(as.character(b$Xray_machines_per_10.000_residents)),
+            paired=FALSE,conf.int = TRUE, conf.level = 0.95)
+```
+
+# eAppendix: Random Forest results - Nested Cross Validation (CV) Analysis
+
+- Folds for nested CV using index folds from CV.SuperLearner
+```{r}
+final_data_sort2<-cbind(as.numeric(as.character(row.names(final_data_sort))),
+                        select(final_data_sort,-c(Municipality_code,original_LE,position)))
+names(final_data_sort2)[1]<-"index_SL"
+
+data_list <- lapply(1:10, function(x){paste0("data", x)})
+i=1
+for(i in 1:10){
+  index_SL<-as.data.frame(cvSL$folds[[i]])
+  names(index_SL)[1]<-"index_SL"
+  data_list[[i]]<-merge(index_SL,final_data_sort2,by="index_SL")
+}
+
+data_list_all<-select(melt(data_list,id=1:ncol(final_data_sort2)),-c(L1,index_SL))
+names(data_list_all)
+```
+
+- Random Forest algorithm to visualize variable importance
+```{r}
+RF_fit<-list()
+importvar_RF<-list()
+pred_rf<-list()
+
+j=1
+for (j in 1:10){
+  
+  #training set
+  data_training <- select(melt(data_list[-j],id=1:ncol(final_data_sort2)),-c(L1,index_SL))
+  
+  X_training = select(data_training,-Life_expectance)
+  
+  Y_training = data_training$Life_expectance
+  
+  trainData<-cbind(Y_training,X_training)
+  
+  #---------------------------------------------------------------------------------------------
+  #test set
+  data_teste <- select(data_list[[j]],-index_SL)
+  
+  X_test = select(data_teste,-Life_expectance)
+  
+  Y_test = data_teste$Life_expectance
+  
+  testData<-cbind(Y_test,X_test)
+  
+#---------------------------------------------------------------------------------------------------
+#Fit using Random Forest algorithm
+set.seed(1)
+rf_fit <- train(X_training,Y_training, 
+                 method = "rf",
+                 tuneGrid = expand.grid(.mtry= c(10,20,30,35,40)),
+                 trControl = trainControl(method = "cv",
+                                          number = 10,
+                                          verboseIter = FALSE,
+                                          savePredictions = TRUE),
+                 importance=TRUE)
+
+RF_fit[[j]]<-rf_fit
+ 
+#---------------------------------------------------------------------------------------------------
+#variable importance
+importvar_RF[[j]]<-varImp(rf_fit)
+
+#---------------------------------------------------------------------------------------------------
+#Predictions
+pred_rf[[j]]<-predict(rf_fit, newdata = X_test)
+}
+```
+
+- Variable importance to each iteration
+```{r}
+plot(importvar_RF[[1]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[2]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[3]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[4]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[5]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[6]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[7]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[8]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[9]],top=10,scales=list(y=list(cex=.95)))
+plot(importvar_RF[[10]],top=10,scales=list(y=list(cex=.95)))
+```
+
+- Random Forest analysis without the three most important variables
+```{r}
+RF_fit_1<-list()
+pred_rf_1<-list()
+
+RF_fit_2<-list()
+pred_rf_2<-list()
+
+RF_fit_3<-list()
+pred_rf_3<-list()
+
+j=1
+for (j in 1:10){
+#---------------------------------------------------------------------------------------------------
+##Without State_MG
+#---------------------------------------------------------------------------------------------------
+#training set
+data_training <- select(melt(data_list[-j],id=1:ncol(final_data_sort2)),-c(L1,index_SL,State_MG))
+  
+X_training = select(data_training,-Life_expectance)
+  
+Y_training = data_training$Life_expectance
+  
+trainData<-cbind(Y_training,X_training)
+  
+#---------------------------------------------------------------------------------------------------
+#test set
+data_teste <- select(data_list[[j]],-c(index_SL,State_MG))
+  
+X_test = select(data_teste,-Life_expectance)
+  
+Y_test = data_teste$Life_expectance
+  
+testData<-cbind(Y_test,X_test)
+  
+#---------------------------------------------------------------------------------------------------
+#Fit using Random Forest algorithm
+set.seed(1)
+rf_fit_1 <- train(X_training,Y_training, 
+                 method = "rf",
+                 tuneGrid = expand.grid(.mtry= c(10,20,30,35,40)),
+                 trControl = trainControl(method = "cv",
+                                          number = 10,
+                                          verboseIter = FALSE,
+                                          savePredictions = TRUE),
+                 importance=TRUE)
+
+RF_fit_1[[j]]<-rf_fit_1
+ 
+#---------------------------------------------------------------------------------------------------
+#Predictions
+pred_rf_1[[j]]<-predict(rf_fit_1, newdata = X_test)
+
+#---------------------------------------------------------------------------------------------------
+##Without illiteracy_rate  
+#---------------------------------------------------------------------------------------------------
+#training set
+data_training <- select(melt(data_list[-j],id=1:ncol(final_data_sort2)),-c(L1,index_SL,Illiteracy_rate))
+  
+X_training = select(data_training,-Life_expectance)
+  
+Y_training = data_training$Life_expectance
+  
+trainData<-cbind(Y_training,X_training)
+  
+#---------------------------------------------------------------------------------------------------
+#test set
+data_teste <- select(data_list[[j]],-c(index_SL,Illiteracy_rate))
+  
+X_test = select(data_teste,-Life_expectance)
+
+Y_test = data_teste$Life_expectance
+  
+testData<-cbind(Y_test,X_test)
+  
+#---------------------------------------------------------------------------------------------------
+#Fit using Random Forest algorithm
+set.seed(1)
+rf_fit_2 <- train(X_training,Y_training, 
+                 method = "rf",
+                 tuneGrid = expand.grid(.mtry= c(10,20,30,35,40)),
+                 trControl = trainControl(method = "cv",
+                                          number = 10,
+                                          verboseIter = FALSE,
+                                          savePredictions = TRUE),
+                 importance=TRUE)
+
+RF_fit_2[[j]]<-rf_fit_2
+ 
+#---------------------------------------------------------------------------------------------------
+#Predictions
+pred_rf_2[[j]]<-predict(rf_fit_2, newdata = X_test)
+
+#---------------------------------------------------------------------------------------------------
+##without Automobile_ownership
+#---------------------------------------------------------------------------------------------------
+#training set
+data_training <- select(melt(data_list[-j],id=1:ncol(final_data_sort2)),-c(L1,index_SL,Automobile_ownership))
+  
+X_training = select(data_training,-Life_expectance)
+  
+Y_training = data_training$Life_expectance
+  
+trainData<-cbind(Y_training,X_training)
+  
+#---------------------------------------------------------------------------------------------------
+#test set
+data_teste <- select(data_list[[j]],-c(index_SL,Automobile_ownership))
+  
+X_test = select(data_teste,-Life_expectance)
+  
+Y_test = data_teste$Life_expectance
+  
+testData<-cbind(Y_test,X_test)
+  
+#---------------------------------------------------------------------------------------------------
+#Fit using Random Forest algorithm
+set.seed(1)
+rf_fit_3 <- train(X_training,Y_training, 
+                 method = "rf",
+                 tuneGrid = expand.grid(.mtry= c(10,20,30,35,40)),
+                 trControl = trainControl(method = "cv",
+                                          number = 10,
+                                          verboseIter = FALSE,
+                                          savePredictions = TRUE),
+                 importance=TRUE)
+
+RF_fit_3[[j]]<-rf_fit_3
+ 
+#---------------------------------------------------------------------------------------------------
+#Predictions
+pred_rf_3[[j]]<-predict(rf_fit_3, newdata = X_test)
+}
+```
+
+- MSE and RMSE for Random forest models
+```{r}
+##Without State_MG
+pred_rf_1_all<-c(pred_rf_1[[1]],pred_rf_1[[2]],pred_rf_1[[3]],pred_rf_1[[4]],pred_rf_1[[5]],
+                pred_rf_1[[6]],pred_rf_1[[7]],pred_rf_1[[8]],pred_rf_1[[9]],pred_rf_1[[10]])
+
+rmse_RF_1<-rmse(data_list_all$Life_expectance,pred_rf_1_all)
+rmse_RF_1
+mse_RF_1<-rmse_RF_1^2
+mse_RF_1
+
+##Without illiteracy_rate
+pred_rf_2_all<-c(pred_rf_2[[1]],pred_rf_2[[2]],pred_rf_2[[3]],pred_rf_2[[4]],pred_rf_2[[5]],
+                pred_rf_2[[6]],pred_rf_2[[7]],pred_rf_2[[8]],pred_rf_2[[9]],pred_rf_2[[10]])
+
+rmse_RF_2<-rmse(data_list_all$Life_expectance,pred_rf_2_all)
+rmse_RF_2
+mse_RF_2<-rmse_RF_2^2
+mse_RF_2
+
+##without Automobile_ownership
+pred_rf_3_all<-c(pred_rf_3[[1]],pred_rf_3[[2]],pred_rf_3[[3]],pred_rf_3[[4]],pred_rf_3[[5]],
+                pred_rf_3[[6]],pred_rf_3[[7]],pred_rf_3[[8]],pred_rf_3[[9]],pred_rf_3[[10]])
+
+rmse_RF_3<-rmse(data_list_all$Life_expectance,pred_rf_3_all)
+rmse_RF_3
+mse_RF_3<-rmse_RF_3^2
+mse_RF_3
+```
+
+# Top 100 under and over for each tertile
+```{r}
+mun_code<-read.csv2("mun_code.csv",header = TRUE)
+
+T1<-merge(overunder_T1,mun_code,by="Municipality_code")
+write.table(T1,"1tertile.csv",row.names = FALSE, dec = ".",sep = ";")
+
+T1T2<-merge(overunder_T1T2,mun_code,by="Municipality_code")
+write.table(T1T2,"2tertile.csv",row.names = FALSE,dec = ".",sep = ";")
+
+T2<-merge(overunder_T2,mun_code,by="Municipality_code")
+write.table(T2,"3tertile.csv",row.names = FALSE,dec = ".",sep = ";")
+```
+
+# Graph: CV risk with mean and square error associated to each candidate algorithm
+```{r}
+#Figure 1
+data_cv_risk<-read.csv2("Data_cv_risk.csv",header=TRUE)
+data_cv_risk$mean<-as.numeric(as.character(data_cv_risk$mean))
+data_cv_risk$sd<-as.numeric(as.character(data_cv_risk$sd))
+data_cv_risk$Algorithm <- factor(data_cv_risk$Algorithm,
+                                 levels = data_cv_risk$Algorithm[order(data_cv_risk$mean, decreasing = T)])
+
+library(ggplot2)
+g1<-ggplot(data_cv_risk,aes(x=mean, y=Algorithm,order=Algorithm))+
+  geom_errorbarh(aes(xmin=mean-sd, xmax=mean+sd), height=.2)+
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(limits=c(0.16,0.28),breaks = seq(0.16, 0.28, 0.02)) +
+  xlab("10-fold CV Mean Square Error") +
+  ylab("Method") +
+  theme(panel.background = element_rect(fill = "white", colour = "grey50"))
+
+tiff("cv_risk.tiff", height = 12, width = 17, units = 'cm',compression = "lzw", res = 300)
+      plot(g1)
+      dev.off()
+```
+
+# Predicted SL versus observed life expectancy
+```{r}
+#Figure 2
+g2<-qplot(newdata$original_LE,
+      newdata$SL_original_value,
+      alpha = I(1/4)) +
+      theme(panel.background = element_rect(fill = "white", colour = "grey50")) +
+      xlim(65,80) +
+      ylim(65,80) +
+      labs(x="Observed life expectancy",y="Predicted SL life expectancy")
+      
+tiff("obs_vs_pred.tiff", height = 12, width = 17, units = 'cm',compression = "lzw", res = 300)
+plot(g2)
+dev.off()
+```
